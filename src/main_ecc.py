@@ -14,14 +14,15 @@ parser.add_argument('-classification', action='store_true', default=False)
 parser.add_argument('-regression', action='store_true', default=False)
 parser.add_argument('-classification_30', action='store_true', default=False)
 parser.add_argument('-regression_30', action='store_true', default=False)
-
+parser.add_argument('-embedding_split_10', action='store_true', default=False, help="Split users in 10 groups and make separate edgelist file")
+parser.add_argument('-split_n', action='store', default=10, help='Number of bins')
 args = parser.parse_args()
 
 if args.load_all:
     df_30 = check_and_import('./df/df_30')
     if df_30 is None:
         df_30 = import_30("./data/30_eventinfo.csv")
-        #df_30 = mark_timewindow(df_30)
+        df_30 = mark_timewindow(df_30)
         save_pickle(df_30, 'df_30')
 
 if args.marktime:
@@ -29,9 +30,15 @@ if args.marktime:
     df_30 = mark_timewindow(df_30) 
 
 df_ml_iu = check_and_import('./df/df_ml')
+if df_ml_iu is None:
+    df_ml_iu = import_ml("./data/ratings.csv")
+    df_ml_iu = mark_timewindow(df_ml_iu)
+    df_ml_iu.columns = ['uid','id','feedback','timestamp','timewindow']
+    save_pickle(df_ml_iu, 'df_ml_iu')
 
 df_30_iu = check_and_import('./df/df_30_iu')
 if df_30_iu is None:
+    # df_30_iu = df_30.groupby(["uid", "id", "ym"]).size().reset_index(name="feedback")
     df_30_iu = df_30.groupby(["uid", "id", "timewindow"]).size().reset_index(name="feedback")
     save_pickle(df_30_iu, 'df_30_iu')
 
@@ -40,7 +47,7 @@ if df_30_ue is None or df_30_ie is None:
     df_30_i = df_30_iu.groupby(["id","timewindow"]).size().reset_index(name="unum")
     df_30_i = calculate_ir(df_30_i)
     save_pickle(df_30_i, 'df_30_i')
-    df_30_userinfo = import_30_userinfo('./30/users.txt')
+    df_30_userinfo = import_30_userinfo('./data/30_users.txt')
     save_pickle(df_30_userinfo, 'df_30_userinfo')
     df_30_ue = calculate_ue(df_30_i, df_30_iu)
     save_pickle(df_30_ue, 'df_30_ue')
@@ -50,13 +57,19 @@ if df_30_ue is None or df_30_ie is None:
 
 df_ml_ue, df_ml_ie = check_and_import('./df/df_ml_ue'), check_and_import('./df/df_ml_ie')
 if df_ml_ue is None or df_ml_ie is None:
-    df_ml_i = df_ml.groupby(["id","timewindow"]).size().reset_index(name="unum")
+    df_ml_i = df_ml_iu.groupby(["id","timewindow"]).size().reset_index(name="unum")
     df_ml_i = calculate_ir(df_ml_i)
     save_pickle(df_ml_i, 'df_ml_i')
     df_ml_ue = calculate_ue(df_ml_i, df_ml_iu)
     save_pickle(df_ml_ue, 'df_ml_ue')
     df_ml_ie = calculate_ie(df_ml_iu, df_ml_ue)
     save_pickle(df_ml_ie, 'df_ml_ie')
+
+if args.embedding_split:
+    df_30_ue = mark_n(df_30_ue, 'ue', args.split_n)
+    split_and_save_edgelist(df_30_iu, df_30_ue, args.split_n, './graph/30/', '')
+    df_ml_ue = mark_n(df_ml_ue, 'ue', args.split_n)
+    split_and_save_edgelist(df_ml_iu, df_ml_ue, args.split_n, './graph/ml/', '')
 
 if args.plot_density:
     # Density - IR, UE, IE
@@ -84,7 +97,7 @@ if args.classification_30 or args.regression_30:
     import gensim
     song2vec = gensim.models.Word2Vec.load('./df/song2vec_model_5')
     
-    print(len(df_30_iu_uvec))
+    # print(len(df_30_iu_uvec))
     X, y = make_data(df_30_iu_uvec, item_vec=song2vec)
     df_30_data = list(zip(X, y))
     X_sample, y_sample = zip(*random.sample(df_30_data, 1000000))
@@ -138,4 +151,4 @@ if args.regression_30:
     from sklearn.ensemble import RandomForestRegressor
     regressor3 = RandomForestRegressor(n_estimators = 100, random_state = 0)
     regressor3.fit(X_train, y_train)
-    print(regressor2.score(X_test, y_test))
+    # print(regressor2.score(X_test, y_test))

@@ -210,17 +210,26 @@ def split_and_save_edgelist(df_iu, df_ue, split_n, edge_list_path='./graph/', fi
     if not os.path.isdir(edge_list_path):
         os.mkdir(edge_list_path)
     for i in range(1, split_n+1):
-        user_list = list(df_ue[df_ue["ue_"+str(split_n)] == i])
+        user_list = list(df_ue[df_ue["ue_"+str(split_n)] == i]['uid'])
         df_iu_temp = df_iu[df_iu.uid.isin(user_list)]
         df_iu_temp = df_iu_temp[['uid','id','feedback']]
         df_iu_temp = df_iu_temp.values.tolist()
         for data in df_iu_temp:
-            data[0] = 'u'+data[0]
-            data[1] = 'i'+data[1]
+            # data[0] = data[0]
+            data[1] = '9999999'+data[1]
             data[2] = str(data[2])
         
         with open(edge_list_path+file_prefix+'ue_{}.edgelist'.format(i),'w') as file:
             file.write("\n".join([' '.join(x) for x in df_iu_temp]))
 
+def save_edgelist(df_iu, edge_list_path='./graph/', file_prefix=''):
+    df_iu = df_iu[['uid','id','feedback']]
+    df_iu = df_iu.values.tolist()
+    for data in df_iu:
+        data[1] = '9999999'+data[1]
+        data[2] = str(data[2])
+    with open(edge_list_path+file_prefix+'ue.edgelist','w') as file:
+        file.write("\n".join([' '.join(x) for x in df_iu]))
 
+    
 

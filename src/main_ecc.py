@@ -66,8 +66,10 @@ if df_ml_ue is None or df_ml_ie is None:
     save_pickle(df_ml_ie, 'df_ml_ie')
 
 if args.embedding_split:
+    save_edgelist(df_30_iu, './graph/30/', '')
     df_30_ue = mark_n(df_30_ue, 'ue', args.split_n)
     split_and_save_edgelist(df_30_iu, df_30_ue, args.split_n, './graph/30/', '')
+    save_edgelist(df_ml_iu, './graph/ml/', '')
     df_ml_ue = mark_n(df_ml_ue, 'ue', args.split_n)
     split_and_save_edgelist(df_ml_iu, df_ml_ue, args.split_n, './graph/ml/', '')
 

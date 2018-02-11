@@ -1,0 +1,16 @@
+_Store
+target
+bin
+build
+.gradle
+*.iml
+*.ipr
+*.iws
+*.log
+.classpath
+.project
+.settings
+.idea
+./emb
+.vscode
+*.pyc

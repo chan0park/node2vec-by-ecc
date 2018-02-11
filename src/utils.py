@@ -5,7 +5,8 @@ import pickle
 import pandas as pd
 import math
 import time
-import numpy
+import numpy as np
+import random
 
 def import_ml(ml_path="./data/ratings.csv", headercol=None):
     with open(ml_path, 'r') as file:
@@ -162,7 +163,7 @@ def calculate_uie_dist(df_iu, df_ie, df_ue):
 
 def calculate_uvec(df_ue, df_udist):  
     userlist = list(df_ue['uid'])
-    temp_dist = numpy.nan_to_num(df_udist['dist'])
+    temp_dist = np.nan_to_num(df_udist['dist'])
     user_vec = []
     for i in range(int(len(temp_dist)/100)):
         tmp = temp_dist[i*100:(i+1)*100]
@@ -206,7 +207,6 @@ def calculate_iu_uvec(df_iu, df_ie, df_ue):
 
 
 def split_and_save_edgelist(df_iu, df_ue, split_n, edge_list_path='./graph/', file_prefix=''):
-    import os
     if not os.path.isdir(edge_list_path):
         os.mkdir(edge_list_path)
     for i in range(1, split_n+1):
@@ -230,6 +230,58 @@ def save_edgelist(df_iu, edge_list_path='./graph/', file_prefix=''):
         data[2] = str(data[2])
     with open(edge_list_path+file_prefix+'ue.edgelist','w') as file:
         file.write("\n".join([' '.join(x) for x in df_iu]))
+
+
+def random_sample_users(df, ratio):
+    '''
+    randomly sample users of input ratio to reduce size of the df
+    '''
+    userlist = [x[0] for x in list(df.groupby("uid")['uid'])]
+    sample_userlist = [userlist[i] for i in random.sample(xrange(len(userlist)), int(ratio*len(userlist))) ]
+    df = df[df.uid.isin(sample_userlist)]
+    return df
+
+def emb_file_to_user_dict(emb_path):
+    with open(emb_path,'r') as file:
+        emb = file.read().splitlines()
+    emb_meta = emb[0]
+    emb = emb[1:]
+    user_emb = [x.split() for x in emb if not x.startswith('9999999')]
+    user_dict = {}
+    for user in user_emb:
+        user_dict[user[0]] = [float(x) for x in user[1:]]
+    return user_dict
+
+def find_similar_users(emb_path, ratio):
+    user_dict = emb_file_to_user_dict(emb_path)
+    userlist = user_dict.keys()
+    target_user = random.choice(userlist)
+    target_user_vec = user_dict[target_user]
+    cos_sim = []
+    from scipy import spatial
+    for user in userlist:
+        temp_cos = 1 - spatial.distance.cosine(target_user_vec, user_dict[user])
+        cos_sim.append((user, temp_cos))
+    from operator import itemgetter
+    cos_sim.sort(key=itemgetter(1), reverse=True)
+    user_num = int(ratio*float(len(userlist)))
+    similar_users = [x[0] for x in cos_sim[:user_num]]
+    return similar_users
+    
+def save_edgelist_of_users(df_iu, user_list, edge_list_path='./graph/', file_prefix=''):
+    if not os.path.isdir(edge_list_path):
+        os.mkdir(edge_list_path)
+    df_iu_temp = df_iu[df_iu.uid.isin(user_list)]
+    df_iu_temp = df_iu_temp[['uid','id','feedback']]
+    df_iu_temp = df_iu_temp.values.tolist()
+    for data in df_iu_temp:
+        # data[0] = data[0]
+        data[1] = '9999999'+data[1]
+        data[2] = str(data[2])
+    
+    with open(edge_list_path+file_prefix+'.edgelist','w') as file:
+        file.write("\n".join([' '.join(x) for x in df_iu_temp]))
+
 
     
 

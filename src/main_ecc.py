@@ -16,6 +16,7 @@ parser.add_argument('-classification_30', action='store_true', default=False)
 parser.add_argument('-regression_30', action='store_true', default=False)
 parser.add_argument('-embedding_split_10', action='store_true', default=False, help="Split users in 10 groups and make separate edgelist file")
 parser.add_argument('-split_n', action='store', default=10, help='Number of bins')
+parser.add_argument('-toy', action='store_true', default=False, help='Toy mode - include split/save edgelist')
 args = parser.parse_args()
 
 if args.load_all:
@@ -29,7 +30,7 @@ if args.marktime:
     df_ml = mark_timewindow(df_ml)
     df_30 = mark_timewindow(df_30) 
 
-df_ml_iu = check_and_import('./df/df_ml')
+df_ml_iu = check_and_import('./df/df_ml_iu')
 if df_ml_iu is None:
     df_ml_iu = import_ml("./data/ratings.csv")
     df_ml_iu = mark_timewindow(df_ml_iu)
@@ -65,7 +66,42 @@ if df_ml_ue is None or df_ml_ie is None:
     df_ml_ie = calculate_ie(df_ml_iu, df_ml_ue)
     save_pickle(df_ml_ie, 'df_ml_ie')
 
-if args.embedding_split:
+if args.toy:
+    df_30_toy = random_sample_users(df_30, 0.01)
+    df_ml_iu_toy = random_sample_users(df_ml_iu, 0.01)
+    df_30_iu_toy = df_30_toy.groupby(["uid", "id", "timewindow"]).size().reset_index(name="feedback")
+    df_30_i_toy = df_30_iu_toy.groupby(["id","timewindow"]).size().reset_index(name="unum")
+    df_30_i_toy = calculate_ir(df_30_i_toy)
+    df_30_ue_toy = calculate_ue(df_30_i_toy, df_30_iu_toy)
+    df_30_ie_toy = calculate_ie(df_30_iu_toy, df_30_ue_toy)
+    df_ml_iu_toy['feedback'] = [float(x) for x in list(df_ml_iu_toy.feedback)]
+    df_ml_i_toy = df_ml_iu_toy.groupby(["id","timewindow"]).size().reset_index(name="unum")
+    df_ml_i_toy = calculate_ir(df_ml_i_toy)
+    df_ml_ue_toy = calculate_ue(df_ml_i_toy, df_ml_iu_toy)
+    df_ml_ie_toy = calculate_ie(df_ml_iu_toy, df_ml_ue_toy)
+    save_edgelist(df_30_iu_toy, './graph/30_toy/', '')
+    df_30_ue_toy = mark_n(df_30_ue_toy, 'ue', args.split_n)
+    split_and_save_edgelist(df_30_iu_toy, df_30_ue_toy, args.split_n, './graph/30_toy/', '')
+    save_edgelist(df_ml_iu_toy, './graph/ml_toy/', '')
+    df_ml_ue_toy = mark_n(df_ml_ue_toy, 'ue', args.split_n)
+    split_and_save_edgelist(df_ml_iu_toy, df_ml_ue_toy, args.split_n, './graph/ml_toy/', '')
+
+    df_30_toy_random = random_sample_users(df_30_toy, 0.1)
+    df_30_iu_toy_random = df_30_toy_random.groupby(["uid", "id", "timewindow"]).size().reset_index(name="feedback")
+    save_edgelist(df_30_iu_toy_random, './graph/30_toy/', 'random_')
+    df_ml_iu_toy_random = random_sample_users(df_ml_iu_toy, 0.1)
+    save_edgelist(df_ml_iu_toy_random, './graph/ml_toy/', 'random_')
+
+    df_ml_iu_toy = random_sample_users(df_ml_iu, 0.01)
+    similar_users = find_similar_users('./emb/ml_toy/ue.emb', 0.1)
+    save_edgelist_of_users(df_ml_iu_toy, similar_users, './graph/ml_toy/', file_prefix='cosine_onetenth')
+    df_ml_iu_toy['feedback'] = [float(x) for x in list(df_ml_iu_toy.feedback)]
+    df_ml_i_toy = df_ml_iu_toy.groupby(["id","timewindow"]).size().reset_index(name="unum")
+    df_ml_i_toy = calculate_ir(df_ml_i_toy)
+    df_ml_ue_toy = calculate_ue(df_ml_i_toy, df_ml_iu_toy)
+    df_ml_ie_toy = calculate_ie(df_ml_iu_toy, df_ml_ue_toy)
+
+# if args.embedding_split:
     save_edgelist(df_30_iu, './graph/30/', '')
     df_30_ue = mark_n(df_30_ue, 'ue', args.split_n)
     split_and_save_edgelist(df_30_iu, df_30_ue, args.split_n, './graph/30/', '')

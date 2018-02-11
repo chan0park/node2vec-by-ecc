@@ -36,20 +36,41 @@ class Graph():
 
 		return walk
 
-	def simulate_walks(self, num_walks, walk_length):
+	def simulate_walks(self, num_walks, walk_length, verbose=False):
 		'''
 		Repeatedly simulate random walks from each node.
 		'''
 		G = self.G
 		walks = []
 		nodes = list(G.nodes())
-		print 'Walk iteration:'
+		print 'Walk iteration: '+str(num_walks)
 		for walk_iter in range(num_walks):
-			print str(walk_iter+1), '/', str(num_walks)
+			if verbose:
+				print str(walk_iter+1), '/', str(num_walks)
 			random.shuffle(nodes)
 			for node in nodes:
 				walks.append(self.node2vec_walk(walk_length=walk_length, start_node=node))
 
+		return walks
+
+	def simulate_walks_by_popularity(self, num_walks, walk_length):
+		'''
+		Repeatedly simulate random walks from each node.
+		'''
+		G = self.G
+		walks = []
+		nodes = list(G.nodes())
+		print 'Node iteration:'
+		for node in nodes:
+			if G.edges(node) < 10:
+				for walk_iter in range(num_walks*2):
+					walks.append(self.node2vec_walk(walk_length=walk_length, start_node=node))
+			elif G.edges(node) < 5:
+				for walk_iter in range(num_walks):
+					walks.append(self.node2vec_walk(walk_length=walk_length, start_node=node))
+			else:
+				for walk_iter in range(2):
+					walks.append(self.node2vec_walk(walk_length=walk_length, start_node=node))
 		return walks
 
 	def get_alias_edge(self, src, dst):
@@ -83,6 +104,39 @@ class Graph():
 		alias_nodes = {}
 		for node in G.nodes():
 			unnormalized_probs = [G[node][nbr]['weight'] for nbr in sorted(G.neighbors(node))]
+			norm_const = sum(unnormalized_probs)
+			normalized_probs =  [float(u_prob)/norm_const for u_prob in unnormalized_probs]
+			alias_nodes[node] = alias_setup(normalized_probs)
+
+		alias_edges = {}
+		triads = {}
+
+		if is_directed:
+			for edge in G.edges():
+				alias_edges[edge] = self.get_alias_edge(edge[0], edge[1])
+		else:
+			for edge in G.edges():
+				alias_edges[edge] = self.get_alias_edge(edge[0], edge[1])
+				alias_edges[(edge[1], edge[0])] = self.get_alias_edge(edge[1], edge[0])
+
+		self.alias_nodes = alias_nodes
+		self.alias_edges = alias_edges
+
+		return
+
+	def preprocess_transition_probs_popularity(self):
+		'''
+		Preprocessing of transition probabilities for guiding the random walks.
+		'''
+		G = self.G
+		is_directed = self.is_directed
+
+		alias_nodes = {}
+		for node in G.nodes():
+			if str(node).startswith('9999999'):
+				unnormalized_probs = [G[node][nbr]['weight'] for nbr in sorted(G.neighbors(node))]
+			else:
+				unnormalized_probs = [G[node][nbr]['weight']*1.0/len(G[nbr]) for nbr in sorted(G.neighbors(node))]
 			norm_const = sum(unnormalized_probs)
 			normalized_probs =  [float(u_prob)/norm_const for u_prob in unnormalized_probs]
 			alias_nodes[node] = alias_setup(normalized_probs)

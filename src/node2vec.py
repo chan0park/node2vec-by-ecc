@@ -2,7 +2,6 @@ import numpy as np
 import networkx as nx
 import random
 
-
 class Graph():
 	def __init__(self, nx_G, is_directed, p, q):
 		self.G = nx_G
@@ -43,11 +42,10 @@ class Graph():
 		G = self.G
 		walks = []
 		nodes = list(G.nodes())
-		print 'Walk iteration: '+str(num_walks)
+		print('Walk iteration: '+str(num_walks))
 		for walk_iter in range(num_walks):
 			if verbose:
-				print str(walk_iter+1), '/', str(num_walks)
-			random.shuffle(nodes)
+				print(str(walk_iter+1), '/', str(num_walks))
 			for node in nodes:
 				walks.append(self.node2vec_walk(walk_length=walk_length, start_node=node))
 
@@ -60,7 +58,7 @@ class Graph():
 		G = self.G
 		walks = []
 		nodes = list(G.nodes())
-		print 'Node iteration:'
+		print('Node iteration:')
 		for node in nodes:
 			if G.edges(node) < 10:
 				for walk_iter in range(num_walks*2):

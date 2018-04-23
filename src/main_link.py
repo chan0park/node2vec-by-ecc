@@ -14,6 +14,9 @@ import numpy as np
 import networkx as nx
 import node2vec
 import random
+import time
+import math
+import pathos.pools as pp
 from gensim.models import Word2Vec
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
@@ -43,7 +46,7 @@ def parse_args():
 	parser.add_argument('--window-size', type=int, default=10,
                     	help='Context size for optimization. Default is 10.')
 
-	parser.add_argument('--iter', default=1, type=int,
+	parser.add_argument('--iter', type=int, default=1,
                       help='Number of epochs in SGD')
 
 	parser.add_argument('--workers', type=int, default=8,
@@ -97,7 +100,7 @@ def parse_args():
 
 
 
-def read_graph():
+def read_graph(args):
 	'''
 	Reads the input network in networkx.
 	'''
@@ -119,7 +122,6 @@ def learn_embeddings(walks):
 	'''
 	walks = [map(str, walk) for walk in walks]
 	model = Word2Vec(walks, size=args.dimensions, window=args.window_size, min_count=0, sg=1, workers=args.workers, iter=args.iter)
-	# model.wv.save_word2vec_format(args.output)
 	
 	return model.wv
 
@@ -271,19 +273,19 @@ def get_roc_score(emb, edges_pos, edges_neg, args):
     ap_score = average_precision_score(labels_all, preds_all)
     return roc_score, ap_score
 
-def build_neg_samples(graph, true_edges):
-    false_samples = []
-    nodes = graph.nodes()
+def build_neg_samples(nodes, true_edges):
+    true_edges = set(true_edges)
+    false_samples = set()
     while len(false_samples) < len(true_edges):
         sample_nodes = random.sample(nodes, 2)
-        false_edge = [min(sample_nodes), max(sample_nodes)]
+        false_edge = (min(sample_nodes), max(sample_nodes))
         if false_edge in true_edges:
             continue
         if false_edge in false_samples:
             continue
-        false_samples.append(false_edge)
+        false_samples.add(false_edge)
     assert len(false_samples) == len(true_edges)
-
+    false_samples = list(false_samples)
     return false_samples
 
 def simulate_walk_popularity(args, G):
@@ -299,6 +301,37 @@ def simulate_walk_popularity(args, G):
         walks = G.simulate_walks(num_walks, args.walk_length)        
         G.preprocess_transition_probs_popularity()
         walks.extend(G.simulate_walks(num_walks, args.walk_length))
+    return walks
+
+def node2vec_walk_multi(num_walks, walk_length,  G, nodes):
+    walks = []
+    for _ in range(num_walks):
+        for node in nodes:
+            walks.append(G.node2vec_walk(walk_length, node))
+    return walks
+
+def simulate_walk_popularity_multi(args, G, num_pool=4):
+    p = pp.ProcessPool(num_pool)
+    nodes = list(G.G.nodes())
+    len_nodes = len(nodes)
+    split_point = range(0,len_nodes,int(math.ceil(float(len_nodes)/num_pool)))+[len_nodes]
+    splited_nodes = [nodes[split_point[i]:split_point[i+1]]for i in xrange(len(split_point)-1)]
+
+    walks = []
+    if args.popwalk == "none":
+        G.preprocess_transition_probs()
+        walks = p.map(node2vec_walk_multi, [args.num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes)
+    elif args.popwalk == "pop":
+        G.preprocess_transition_probs_popularity()
+        walks = p.map(node2vec_walk_multi, [args.num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes)
+    elif args.popwalk == "both":
+        G.preprocess_transition_probs()
+        num_walks = int(args.num_walks/2)
+        walks = p.map(node2vec_walk_multi, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes)       
+        G.preprocess_transition_probs_popularity()
+        walks.extend(p.map(node2vec_walk_multi, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes))
+
+    walks = [w for walk in walks for w in walk]
     return walks
 
 def build_user_sim_matrx(emb, user_nodes):
@@ -360,8 +393,7 @@ def add_user_edge(args, g,emb, ratio=0.1):
     elif args.user_edges_mode == "relu-ratio":
         add_edge = get_add_edge_by_relu(user_nodes, user_matrix, args.user_edges_ratio)
     else:
-        print("user-edges-mode value fault: "+str(args.user_edges_mode))
-        raise
+        raise Exception("user-edges-mode value fault: "+str(args.user_edges_mode))
 
     return add_edge
 
@@ -369,26 +401,32 @@ def main(args):
     '''
     Pipeline for representational learning for all nodes in a graph.
     '''
-    nx_G = read_graph()
-    train_edges, test_edges = train_test_split(np.asarray(nx_G.edges()), test_size=args.test_ratio)
-    # _, dev_edges = train_test_split(train_set, test_size=dev_ratio / (1 - test_ratio))
+
+    nx_G = read_graph(args)
+    all_edges = nx_G.edges()
+    train_edges, test_edges = train_test_split(np.asarray(all_edges), test_size=args.test_ratio)
     print('# nodes: {}, #train edges: {}, #test edges: {}'.format(len(nx_G.nodes()),len(train_edges), len(test_edges)))
 
     nx_G.remove_edges_from(test_edges)
     G = node2vec.Graph(nx_G, args.directed, args.p, args.q)
-    walks = simulate_walk_popularity(args, G)
+    if args.num_walks < 2:
+        walks = simulate_walk_popularity(args, G)
+    else:
+        walks = simulate_walk_popularity_multi(args, G, num_pool=4)
+
     emb = learn_embeddings(walks)
 
     if args.add_user_edges and not args.unseparated:
         add_edges = add_user_edge(args, nx_G, emb, ratio=0.1)
         nx_G.add_weighted_edges_from(add_edges)
+        G = node2vec.Graph(nx_G, args.directed, args.p, args.q)
         walks = simulate_walk_popularity(args, G)
         emb = learn_embeddings(walks)
 
     ks = [1,5,10,15,50,100,500,1000]
     results, final_results = link_prediction(args, nx_G, emb, train_edges, test_edges, ks=ks) if args.prediction else (False, False)
-
-    neg_edges = build_neg_samples(nx_G, test_edges)
+    nodes = nx_G.nodes()
+    neg_edges = build_neg_samples(nodes, all_edges)
     roc_score, ap_score = get_roc_score(emb, test_edges, neg_edges, args) if args.auc else (0,0)
 
     return results, final_results, roc_score, ap_score
@@ -397,6 +435,7 @@ if __name__ == "__main__":
     args = parse_args()
     total_roc_score = []
     total_ap_score = []
+    
     for _ in range(args.score_iter):
         results, final_results, roc_score, ap_score = main(args)
         total_roc_score.append(roc_score)

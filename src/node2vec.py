@@ -9,6 +9,46 @@ class Graph():
 		self.p = p
 		self.q = q
 
+	def get_alias_nodes_cur(self, cur):
+		G = self.G
+		unnormalized_probs = [G[cur][nbr]['weight'] for nbr in sorted(G.neighbors(cur))]
+		norm_const = sum(unnormalized_probs)
+		normalized_probs =  [float(u_prob)/norm_const for u_prob in unnormalized_probs]
+		J,q = alias_setup(normalized_probs)
+		return J, q
+	
+	def get_alias_edges_cur(self, prev, cur):
+		J,q = self.get_alias_edge(prev, cur)
+		# if is_directed:
+		# 	for edge in G.edges():
+		# 		alias_edges[edge] = self.get_alias_edge(edge[0], edge[1])
+		# else:
+		# 	for edge in G.edges():
+		# 		alias_edges[edge] = self.get_alias_edge(edge[0], edge[1])
+		# 		alias_edges[(edge[1], edge[0])] = self.get_alias_edge(edge[1], edge[0])
+		return J, q
+
+	def node2vec_walk_on_the_fly(self, walk_length, start_node):
+		'''
+		Simulate a random walk starting from start node.
+		'''
+		G = self.G
+		walk = [start_node]
+		while len(walk) < walk_length:
+			cur = walk[-1]
+			cur_nbrs = sorted(G.neighbors(cur))
+			if len(cur_nbrs) > 0:
+				if len(walk) == 1:
+					J,q = self.get_alias_nodes_cur(cur)
+				else:
+					prev = walk[-2]
+					J,q = self.get_alias_edges_cur(prev,cur)
+				walk.append(cur_nbrs[alias_draw(J,q)])
+			else:
+				break
+
+		return walk
+
 	def node2vec_walk(self, walk_length, start_node):
 		'''
 		Simulate a random walk starting from start node.
@@ -35,19 +75,35 @@ class Graph():
 
 		return walk
 
-	def simulate_walks(self, num_walks, walk_length, verbose=False):
+	def simulate_walks(self, num_walks, walk_length, nodes=None, verbose=False):
 		'''
 		Repeatedly simulate random walks from each node.
 		'''
 		G = self.G
 		walks = []
-		nodes = list(G.nodes())
-		print('Walk iteration: '+str(num_walks))
+		if not nodes:
+			nodes = list(G.nodes())
 		for walk_iter in range(num_walks):
 			if verbose:
 				print(str(walk_iter+1), '/', str(num_walks))
 			for node in nodes:
 				walks.append(self.node2vec_walk(walk_length=walk_length, start_node=node))
+
+		return walks
+
+	def simulate_walks_on_the_fly(self, num_walks, walk_length, nodes=None, verbose=False):
+		'''
+		Repeatedly simulate random walks from each node.
+		'''
+		G = self.G
+		walks = []
+		if not nodes:
+			nodes = list(G.nodes())
+		for walk_iter in range(num_walks):
+			if verbose:
+				print(str(walk_iter+1), '/', str(num_walks))
+			for node in nodes:
+				walks.append(self.node2vec_walk_on_the_fly(walk_length=walk_length, start_node=node))
 
 		return walks
 
@@ -165,7 +221,7 @@ def alias_setup(probs):
 	K = len(probs)
 	q = np.zeros(K)
 	J = np.zeros(K, dtype=np.int)
-
+	
 	smaller = []
 	larger = []
 	for kk, prob in enumerate(probs):
@@ -185,7 +241,6 @@ def alias_setup(probs):
 	        smaller.append(large)
 	    else:
 	        larger.append(large)
-
 	return J, q
 
 def alias_draw(J, q):

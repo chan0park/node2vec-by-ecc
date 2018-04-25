@@ -16,6 +16,8 @@ import node2vec
 import random
 import time
 import math
+import os
+import tempfile
 import pathos.pools as pp
 from gensim.models import Word2Vec
 from gensim.models.word2vec import LineSentence
@@ -317,9 +319,34 @@ def node2vec_walk_multi(num_walks, walk_length,  G, nodes):
             walks.append(G.node2vec_walk(walk_length, node))
     return walks
 
+def node2vec_walk_multi_by_chunk(num_walks, walk_length,  G, nodes, chunk_size):
+    import tempfile
+    tmp_walks_txt = tempfile.NamedTemporaryFile(delete=False)
+    node_chunks = list(chunks(nodes, chunk_size))
+    for i, chunk in enumerate(node_chunks):
+        walks = []
+        for _ in range(num_walks):
+            for node in chunk:
+                walks.append(G.node2vec_walk(walk_length, node))
+        walks = [" ".join(map(str, walk)) for walk in walks]
+        with open(tmp_walks_txt.name, "a") as file:
+            file.write("\n".join(walks)+"\n")
+    return tmp_walks_txt.name
+
 def node2vec_walk_multi_on_the_fly(num_walks, walk_length,  G, nodes):
     walks = G.simulate_walks_on_the_fly(num_walks, args.walk_length, nodes)
     return walks
+
+def node2vec_walk_multi_on_the_fly_by_chunk(num_walks, walk_length,  G, nodes, chunk_size):
+    import tempfile
+    tmp_walks_txt = tempfile.NamedTemporaryFile(delete=False)
+    node_chunks = list(chunks(nodes, chunk_size))
+    for i, chunk in enumerate(node_chunks):
+        walks = G.simulate_walks_on_the_fly(num_walks, args.walk_length, chunk)
+        walks = [" ".join(map(str, walk)) for walk in walks]
+        with open(tmp_walks_txt.name, "a") as file:
+            file.write("\n".join(walks)+"\n")
+    return tmp_walks_txt.name
 
 def simulate_walk_popularity_multi(args, G, num_pool=4):
     p = pp.ProcessPool(num_pool)
@@ -332,7 +359,7 @@ def simulate_walk_popularity_multi(args, G, num_pool=4):
 
     walks = []
     if args.on_the_fly:
-        if args.pop_walk == "both":
+        if args.popwalk == "both":
             G.popwalk == "none"
             walks = p.map(node2vec_walk_multi_on_the_fly, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes)
             G.popwalk == "pop"
@@ -350,6 +377,40 @@ def simulate_walk_popularity_multi(args, G, num_pool=4):
     walks = [w for walk in walks for w in walk]
     return walks
 
+def learn_embeddings_by_chunk(args, G, chunk_size, num_pool):
+    p = pp.ProcessPool(num_pool)
+    nodes = list(G.G.nodes())
+    len_nodes = len(nodes)
+    node_per_num_pool = int(math.ceil(len_nodes*1.0/num_pool))
+    splited_nodes = [nodes[i*node_per_num_pool:(i+1)*node_per_num_pool] for i in range(num_pool)]
+
+    num_walks = int(args.num_walks/2) if args.popwalk == "both" else args.num_walks
+
+    walks_files = []
+    if args.on_the_fly:
+        if args.popwalk == "both":
+            G.popwalk == "none"
+            walks_files = p.map(node2vec_walk_multi_on_the_fly_by_chunk, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes, [chunk_size]*num_pool)
+            G.popwalk == "pop"
+            walks_files.extend(p.map(node2vec_walk_multi_on_the_fly_by_chunk, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes, [chunk_size]*num_pool))
+        else:
+            walks_files = p.map(node2vec_walk_multi_on_the_fly_by_chunk, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes, [chunk_size]*num_pool)
+    else:
+        if args.popwalk == "none" or args.popwalk == "both":
+            G.preprocess_transition_probs()
+            walks_files = p.map(node2vec_walk_multi_by_chunk, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes, [chunk_size]*num_pool)
+        if args.popwalk == "pop" or args.popwalk == "both":
+            G.preprocess_transition_probs_popularity()
+            walks_files.extend(p.map(node2vec_walk_multi_by_chunk, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes, [chunk_size]*num_pool))
+
+    total_walk_file = tempfile.NamedTemporaryFile(delete=False)
+    for wfile in walks_files:
+        os.system("cat "+wfile+" >> "+total_walk_file.name)
+    
+    sentences = LineSentence(total_walk_file.name)
+    model = Word2Vec(sentences, size=args.dimensions, window=args.window_size, min_count=0, sg=1, workers=args.workers, iter=args.iter) 
+    return model.wv
+    
 def build_user_sim_matrx(emb, user_nodes):
     user_matrix = np.zeros((len(user_nodes), len(user_nodes)))
     for i, user in enumerate(user_nodes):
@@ -418,41 +479,6 @@ def chunks(l, n):
     for i in range(0, len(l), n):
         yield l[i:i + n]
 
-def learn_embeddings_by_chunk(args, G, chunk_size, num_pool=4):
-    import tempfile
-    tmp_walks_txt = tempfile.NamedTemporaryFile(delete=False)
-    node_chunks = list(chunks(G.G.nodes(), chunk_size))
-    model = None
-
-    num_walks = int(args.num_walks/2) if args.popwalk=="both" else args.num_walks
-
-    if args.popwalk == "none" or args.popwalk == "both":
-        # G.preprocess_transition_probs()
-        print("start simulate random walk")
-        for i, chunk in enumerate(node_chunks):
-            print("chunk "+str(i))
-            walks = G.simulate_walks_on_the_fly(num_walks, args.walk_length, chunk)
-            walks = [" ".join(map(str, walk)) for walk in walks]
-            with open(tmp_walks_txt.name, "a") as file:
-                file.write("\n".join(walks)+"\n")
-            
-    if args.popwalk == "pop" or args.popwalk == "both":
-        # have to change transition probs popularity
-        G.preprocess_transition_probs_popularity()
-        for chunk in node_chunks:
-            walks = G.simulate_walks(args.num_walks, args.walk_length, chunk)
-            walks = [" ".join(map(str, walk)) for walk in walks]
-            with open(tmp_walks_txt.name, "a") as file:
-                file.write("\n".join(walks)+"\n")
-
-    sentences = LineSentence(tmp_walks_txt.name, max_sentence_length=20000) 
-    model = Word2Vec(sentences, size=args.dimensions, window=args.window_size, min_count=0, sg=1, workers=args.workers, iter=args.iter)  
-    if args.num_walks < 2:
-        walks = simulate_walk_popularity(args, G)
-    else:
-        walks = simulate_walk_popularity_multi(args, G, num_pool=4)
-    return model.wv
-
 def main(args):
     '''
     Pipeline for representational learning for all nodes in a graph.
@@ -464,14 +490,18 @@ def main(args):
     print('# nodes: {}, #train edges: {}, #test edges: {}'.format(len(nx_G.nodes()),len(train_edges), len(test_edges)))
 
     nx_G.remove_edges_from(test_edges)
-    G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.pop_walk)
-    walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
-    emb = learn_embeddings(walks)
+    G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.popwalk)
+    if args.by_chunk:
+        emb = learn_embeddings_by_chunk(args, G, args.chunk_size, args.multi_num)
+    else:
+        walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
+        emb = learn_embeddings(walks)
+    
 
     if args.add_user_edges and not args.unseparated:
         add_edges = add_user_edge(args, nx_G, emb, ratio=0.1)
         nx_G.add_weighted_edges_from(add_edges)
-        G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.pop_walk)
+        G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.popwalk)
         walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
         emb = learn_embeddings(walks)
 
@@ -481,7 +511,7 @@ def main(args):
     neg_edges = build_neg_samples(nodes, all_edges)
     roc_score, ap_score = get_roc_score(emb, test_edges, neg_edges, args) if args.auc else (0,0)
 
-    return results, final_results, roc_score, ap_score
+    return results, final_results, roc_score, ap_score,emb
 
 if __name__ == "__main__":
     args = parse_args()
@@ -490,7 +520,7 @@ if __name__ == "__main__":
 
     start_time = time.time()
     for _ in range(args.score_iter):
-        results, final_results, roc_score, ap_score = main(args)
+        results, final_results, roc_score, ap_score,emb = main(args)
         total_roc_score.append(roc_score)
         total_ap_score.append(ap_score)
     print("Taken time for {} epoch: {}".format(args.score_iter, time.time()-start_time))
@@ -507,3 +537,4 @@ if __name__ == "__main__":
     print("roc_score: {} (iter: {})".format(total_roc_score, args.score_iter))
     print("ap_score: {} (iter: {})\n".format(total_ap_score, args.score_iter))
 
+    os.system("rm /tmp/tmp*")

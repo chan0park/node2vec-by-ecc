@@ -3,29 +3,32 @@ import networkx as nx
 import random
 
 class Graph():
-	def __init__(self, nx_G, is_directed, p, q):
+	def __init__(self, nx_G, is_directed, p, q, popwalk="none"):
 		self.G = nx_G
 		self.is_directed = is_directed
 		self.p = p
 		self.q = q
+		self.popwalk = popwalk
 
 	def get_alias_nodes_cur(self, cur):
 		G = self.G
-		unnormalized_probs = [G[cur][nbr]['weight'] for nbr in sorted(G.neighbors(cur))]
+		if self.popwalk =="none":
+			unnormalized_probs = [G[cur][nbr]['weight'] for nbr in sorted(G.neighbors(cur))]
+		elif self.popwalk =="pop":
+			if str(cur).startswith('9999999'):
+				unnormalized_probs = [G[cur][nbr]['weight'] for nbr in sorted(G.neighbors(cur))]
+			else:
+				unnormalized_probs = [G[cur][nbr]['weight']*1.0/len(G[nbr]) for nbr in sorted(G.neighbors(cur))]
 		norm_const = sum(unnormalized_probs)
 		normalized_probs =  [float(u_prob)/norm_const for u_prob in unnormalized_probs]
 		J,q = alias_setup(normalized_probs)
 		return J, q
 	
 	def get_alias_edges_cur(self, prev, cur):
-		J,q = self.get_alias_edge(prev, cur)
-		# if is_directed:
-		# 	for edge in G.edges():
-		# 		alias_edges[edge] = self.get_alias_edge(edge[0], edge[1])
-		# else:
-		# 	for edge in G.edges():
-		# 		alias_edges[edge] = self.get_alias_edge(edge[0], edge[1])
-		# 		alias_edges[(edge[1], edge[0])] = self.get_alias_edge(edge[1], edge[0])
+		if self.popwalk=="none":
+			J,q = self.get_alias_edge(prev, cur)
+		elif self.popwalk=="pop":
+			J,q = self.get_alias_edge_pop(prev, cur)
 		return J, q
 
 	def node2vec_walk_on_the_fly(self, walk_length, start_node):
@@ -143,6 +146,28 @@ class Graph():
 				unnormalized_probs.append(G[dst][dst_nbr]['weight'])
 			else:
 				unnormalized_probs.append(G[dst][dst_nbr]['weight']/q)
+		norm_const = sum(unnormalized_probs)
+		normalized_probs =  [float(u_prob)/norm_const for u_prob in unnormalized_probs]
+
+		return alias_setup(normalized_probs)
+
+	def get_alias_edge_pop(self, src, dst):
+		'''
+		Get the alias edge setup lists for a given edge.
+		'''
+		G = self.G
+		p = self.p
+		q = self.q
+
+		unnormalized_probs = []
+		for dst_nbr in sorted(G.neighbors(dst)):
+			pop = len(G[dst_nbr])
+			if dst_nbr == src:
+				unnormalized_probs.append(G[dst][dst_nbr]['weight']/(p*pop))
+			elif G.has_edge(dst_nbr, src):
+				unnormalized_probs.append(G[dst][dst_nbr]['weight']/pop)
+			else:
+				unnormalized_probs.append(G[dst][dst_nbr]['weight']/pop)
 		norm_const = sum(unnormalized_probs)
 		normalized_probs =  [float(u_prob)/norm_const for u_prob in unnormalized_probs]
 

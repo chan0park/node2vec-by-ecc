@@ -56,7 +56,9 @@ def parse_args():
 
 	parser.add_argument('--workers', type=int, default=8,
 	                    help='Number of parallel workers. Default is 8.')
-
+	parser.add_argument('--multi-num', type=int, default=8,
+	                    help='Number of multi-processor. Default is 8.')
+    
 	parser.add_argument('--p', type=float, default=1,
 	                    help='Return hyperparameter. Default is 1.')
 
@@ -98,6 +100,8 @@ def parse_args():
 	parser.add_argument('--directed', dest='directed', action='store_true',
 	                    help='Graph is (un)directed. Default is undirected.')
 	parser.add_argument('--undirected', dest='undirected', action='store_false')
+
+	parser.add_argument('--on-the-fly', default=False,action='store_true', help='process random walk on the fly')
 
 	parser.set_defaults(directed=False)
 
@@ -294,8 +298,7 @@ def build_neg_samples(nodes, true_edges):
 def simulate_walk_popularity(args, G):
     if args.popwalk == "none":
         G.preprocess_transition_probs()
-        # walks = G.simulate_walks(args.num_walks, args.walk_length)
-        walks = G.simulate_walks_on_the_fly(args.num_walks, args.walk_length)
+        walks = G.simulate_walks(args.num_walks, args.walk_length)
     elif args.popwalk == "pop":
         G.preprocess_transition_probs_popularity()
         walks = G.simulate_walks(args.num_walks, args.walk_length)
@@ -308,11 +311,14 @@ def simulate_walk_popularity(args, G):
     return walks
 
 def node2vec_walk_multi(num_walks, walk_length,  G, nodes):
+    walks = []
+    for _ in range(num_walks):
+        for node in nodes:
+            walks.append(G.node2vec_walk(walk_length, node))
+    return walks
+
+def node2vec_walk_multi_on_the_fly(num_walks, walk_length,  G, nodes):
     walks = G.simulate_walks_on_the_fly(num_walks, args.walk_length, nodes)
-    # walks = []
-    # for _ in range(num_walks):
-    #     for node in nodes:
-    #         walks.append(G.node2vec_walk(walk_length, node))
     return walks
 
 def simulate_walk_popularity_multi(args, G, num_pool=4):
@@ -322,19 +328,24 @@ def simulate_walk_popularity_multi(args, G, num_pool=4):
     split_point = range(0,len_nodes,int(math.ceil(float(len_nodes)/num_pool)))+[len_nodes]
     splited_nodes = [nodes[split_point[i]:split_point[i+1]]for i in xrange(len(split_point)-1)]
 
+    num_walks = int(args.num_walks/2) if args.popwalk == "both" else args.num_walks
+
     walks = []
-    if args.popwalk == "none":
-        # G.preprocess_transition_probs()
-        walks = p.map(node2vec_walk_multi, [args.num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes)
-    elif args.popwalk == "pop":
-        # G.preprocess_transition_probs_popularity()
-        walks = p.map(node2vec_walk_multi, [args.num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes)
-    elif args.popwalk == "both":
-        G.preprocess_transition_probs()
-        num_walks = int(args.num_walks/2)
-        walks = p.map(node2vec_walk_multi, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes)       
-        G.preprocess_transition_probs_popularity()
-        walks.extend(p.map(node2vec_walk_multi, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes))
+    if args.on_the_fly:
+        if args.pop_walk == "both":
+            G.popwalk == "none"
+            walks = p.map(node2vec_walk_multi_on_the_fly, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes)
+            G.popwalk == "pop"
+            walks.extend(p.map(node2vec_walk_multi_on_the_fly, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes))
+        else:
+            walks = p.map(node2vec_walk_multi_on_the_fly, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes)
+    else:
+        if args.popwalk == "none" or args.popwalk == "both":
+            G.preprocess_transition_probs()
+            walks = p.map(node2vec_walk_multi, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes)
+        if args.popwalk == "pop" or args.popwalk == "both":
+            G.preprocess_transition_probs_popularity()
+            walks.extend(p.map(node2vec_walk_multi, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes))
 
     walks = [w for walk in walks for w in walk]
     return walks
@@ -453,15 +464,15 @@ def main(args):
     print('# nodes: {}, #train edges: {}, #test edges: {}'.format(len(nx_G.nodes()),len(train_edges), len(test_edges)))
 
     nx_G.remove_edges_from(test_edges)
-    G = node2vec.Graph(nx_G, args.directed, args.p, args.q)
-    walks = simulate_walk_popularity_multi(args, G, num_pool=6)
+    G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.pop_walk)
+    walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
     emb = learn_embeddings(walks)
 
     if args.add_user_edges and not args.unseparated:
         add_edges = add_user_edge(args, nx_G, emb, ratio=0.1)
         nx_G.add_weighted_edges_from(add_edges)
-        G = node2vec.Graph(nx_G, args.directed, args.p, args.q)
-        walks = simulate_walk_popularity(args, G)
+        G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.pop_walk)
+        walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
         emb = learn_embeddings(walks)
 
     ks = [1,5,10,15,50,100,500,1000]

@@ -1,0 +1,24 @@
+TEST_RATIO = 0.5
+RANDOM_SEED = 123
+
+WALK_LENGTH = 20
+NUM_WALKS = 1
+
+EMB_DIMENSION = 128
+SGD_EPOCHS = 1
+
+WORKERS = 8
+SCORE_ITER = 1
+
+UNSEPARATED_BOOL = False
+WEIGHTED_BOOL = True
+BY_CHUNK_BOOL = True
+ON_THE_FLY_BOOL = True
+
+LINK_METHOD = "cos" # {cos/avg/hadamard/weight1/weight2}
+POPWALK = "none" # {none/pop/both}
+
+ADD_USER_EDGE_BOOL = False
+USER_EDGES_MODE = "ratio"
+USER_EDGES_RATIO = 0.2
+USER_EDGES_THRE = 0.5

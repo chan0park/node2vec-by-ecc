@@ -9,7 +9,6 @@ Aditya Grover and Jure Leskovec
 Knowledge Discovery and Data Mining (KDD), 2016
 '''
 
-import argparse
 import numpy as np
 import networkx as nx
 import node2vec
@@ -24,92 +23,8 @@ from gensim.models.word2vec import LineSentence
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 from sklearn.metrics import average_precision_score
-
-def parse_args():
-	'''
-	Parses the node2vec arguments.
-	'''
-	parser = argparse.ArgumentParser(description="Run node2vec.")
-
-	parser.add_argument('--input', nargs='?', default='graph/karate.edgelist',
-	                    help='Input graph path')
-
-	parser.add_argument('--output', nargs='?', default='emb/test.emb',
-	                    help='Embeddings path')
-
-	parser.add_argument('--dimensions', type=int, default=128,
-	                    help='Number of dimensions. Default is 128.')
-
-	parser.add_argument('--walk-length', type=int, default=80,
-	                    help='Length of walk per source. Default is 80.')
-
-	parser.add_argument('--num-walks', type=int, default=10,
-	                    help='Number of walks per source. Default is 10.')
-
-	parser.add_argument('--window-size', type=int, default=10,
-                    	help='Context size for optimization. Default is 10.')
-
-	parser.add_argument('--by-chunk', dest='by_chunk', action='store_true', default=False)
-	parser.add_argument('--chunk-size', type=int, default=1000,
-                      help='Number of nodes to simulate random walk and learn embedding')
-
-	parser.add_argument('--iter', type=int, default=1,
-                      help='Number of epochs in SGD')
-
-	parser.add_argument('--workers', type=int, default=8,
-	                    help='Number of parallel workers. Default is 8.')
-	parser.add_argument('--multi-num', type=int, default=8,
-	                    help='Number of multi-processor. Default is 8.')
-    
-	parser.add_argument('--p', type=float, default=1,
-	                    help='Return hyperparameter. Default is 1.')
-
-	parser.add_argument('--q', type=float, default=1,
-	                    help='Inout hyperparameter. Default is 1.')
-
-	parser.add_argument('--weighted', dest='weighted', action='store_true',
-	                    help='Boolean specifying (un)weighted. Default is unweighted.')
-	parser.set_defaults(weighted=False)
-
-	parser.add_argument('--prediction', dest='prediction', action='store_true', default=False, 
-	                    help='Boolean specifying prediction process. Default is false.')
-	parser.add_argument('--auc', dest='auc', action='store', default=True, 
-	                    help='Boolean specifying prediction process. Default is false.')
-
-	parser.add_argument('--segment', default=1, type=int,
-                      help='number of segments for evaluation')
-	parser.add_argument('--score-iter', default=1, type=int,
-                      help='number of iterations for auc scoring process')
-	parser.add_argument('--test-ratio', default=0.5, type=float,
-                      help='ratio for train/test edges')
-
-	parser.add_argument('--add-user-edges', action='store_true', default=False,
-	                    help='add additional similar user edges')
-	parser.add_argument('--user-edges-mode', action='store', default="ratio",
-                      help='select mode for adding user edges (ratio/step/relu)')
-	parser.add_argument('--user-edges-ratio', default=0.1, type=float,
-                      help='ratio for train/test edges')
-	parser.add_argument('--user-edges-thre', default=0.5, type=float,
-                      help='threshold for ReLu activation function')
-
-	parser.add_argument('--link-method', action='store', default="cos",
-                      help='select method for an edge representation (cos/avg/hadamard/weight1/weight2)')
-
-	parser.add_argument('--popwalk', dest='popwalk', action='store', default="none",
-	                    help='three modes are supported for random walk(none/pop/both)')
-	parser.add_argument('--unseparated', dest='unseparated', action='store_true', default=False,
-	                    help='Boolean specifying user and item nodes are seperated. Default is separated.')
-	parser.add_argument('--directed', dest='directed', action='store_true',
-	                    help='Graph is (un)directed. Default is undirected.')
-	parser.add_argument('--undirected', dest='undirected', action='store_false')
-
-	parser.add_argument('--on-the-fly', default=False,action='store_true', help='process random walk on the fly')
-
-	parser.set_defaults(directed=False)
-
-	return parser.parse_args()
-
-
+from settings import RANDOM_SEED
+from parser import args
 
 def read_graph(args):
 	'''
@@ -403,11 +318,12 @@ def learn_embeddings_by_chunk(args, G, chunk_size, num_pool):
             G.preprocess_transition_probs_popularity()
             walks_files.extend(p.map(node2vec_walk_multi_by_chunk, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes, [chunk_size]*num_pool))
 
-    total_walk_file = tempfile.NamedTemporaryFile(delete=False)
+    timestr = time.strftime("%y%m%d_%H%M%S")
+    total_walk_file_name = args.input.replace("graph","walks").replace("edgelist","")+"num{}_length{}_pop{}".format(args.num_walks, args.walk_length, args.popwalk)+timestr
     for wfile in walks_files:
-        os.system("cat "+wfile+" >> "+total_walk_file.name)
+        os.system("cat "+wfile+" >> "+total_walk_file_name)
     
-    sentences = LineSentence(total_walk_file.name)
+    sentences = LineSentence(total_walk_file_name)
     model = Word2Vec(sentences, size=args.dimensions, window=args.window_size, min_count=0, sg=1, workers=args.workers, iter=args.iter) 
     return model.wv
     
@@ -479,29 +395,22 @@ def chunks(l, n):
     for i in range(0, len(l), n):
         yield l[i:i + n]
 
-def main(args):
+def main(args, ep):
     '''
     Pipeline for representational learning for all nodes in a graph.
     '''
 
     nx_G = read_graph(args)
     all_edges = nx_G.edges()
-    train_edges, test_edges = train_test_split(np.asarray(all_edges), test_size=args.test_ratio)
-    print('# nodes: {}, #train edges: {}, #test edges: {}'.format(len(nx_G.nodes()),len(train_edges), len(test_edges)))
+    train_edges, test_edges = train_test_split(np.asarray(all_edges), test_size=args.test_ratio, random_state=RANDOM_SEED)
+    if ep == 0:
+        print('# nodes: {}, #train edges: {}, #test edges: {}'.format(len(nx_G.nodes()),len(train_edges), len(test_edges)))
 
     nx_G.remove_edges_from(test_edges)
     G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.popwalk)
     if args.by_chunk:
         emb = learn_embeddings_by_chunk(args, G, args.chunk_size, args.multi_num)
     else:
-        walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
-        emb = learn_embeddings(walks)
-    
-
-    if args.add_user_edges and not args.unseparated:
-        add_edges = add_user_edge(args, nx_G, emb, ratio=0.1)
-        nx_G.add_weighted_edges_from(add_edges)
-        G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.popwalk)
         walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
         emb = learn_embeddings(walks)
 
@@ -511,19 +420,34 @@ def main(args):
     neg_edges = build_neg_samples(nodes, all_edges)
     roc_score, ap_score = get_roc_score(emb, test_edges, neg_edges, args) if args.auc else (0,0)
 
-    return results, final_results, roc_score, ap_score,emb
+    if args.add_user_edges and not args.unseparated:
+        add_edges = add_user_edge(args, nx_G, emb, ratio=0.1)
+        nx_G.add_weighted_edges_from(add_edges)
+        G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.popwalk)
+        walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
+        emb = learn_embeddings(walks)
+
+        results_user, final_results_user = link_prediction(args, nx_G, emb, train_edges, test_edges, ks=ks) if args.prediction else (False, False)
+        roc_score_user, ap_score_user = get_roc_score(emb, test_edges, neg_edges, args) if args.auc else (0,0)
+    else:
+        roc_score_user, ap_score_user = None, None
+    return results, final_results, roc_score, ap_score, roc_score_user, ap_score_user
 
 if __name__ == "__main__":
-    args = parse_args()
     total_roc_score = []
     total_ap_score = []
+    total_roc_score_user = []
+    total_ap_score_user = []
 
     start_time = time.time()
-    for _ in range(args.score_iter):
-        results, final_results, roc_score, ap_score,emb = main(args)
+    for ep in range(args.score_iter):
+        results, final_results, roc_score, ap_score, roc_score_user, ap_score_user = main(args, ep)
         total_roc_score.append(roc_score)
         total_ap_score.append(ap_score)
-    print("Taken time for {} epoch: {}".format(args.score_iter, time.time()-start_time))
+        total_roc_score_user.append(roc_score_user)
+        total_ap_score_user.append(ap_score_user)
+        
+    print("Taken time for {}epoch: {}\n".format(args.score_iter, round(time.time()-start_time,3)))
 
     total_roc_score = sum(total_roc_score)/len(total_roc_score)
     total_ap_score = sum(total_ap_score)/len(total_ap_score)
@@ -534,7 +458,13 @@ if __name__ == "__main__":
             file.write(str(final_results))
         print("final_results"+str(final_results))
 
-    print("roc_score: {} (iter: {})".format(total_roc_score, args.score_iter))
-    print("ap_score: {} (iter: {})\n".format(total_ap_score, args.score_iter))
+    print("roc_score: {} (iter: {})".format(round(total_roc_score,4), args.score_iter))
+    print("ap_score: {} (iter: {})".format(round(total_ap_score,4), args.score_iter))
+
+    if args.add_user_edges:
+        total_roc_score_user = sum(total_roc_score_user)/len(total_roc_score_user)
+        total_ap_score_user = sum(total_ap_score_user)/len(total_ap_score_user)
+        print("add_user - roc_score: {} (iter: {})".format(round(total_roc_score_user,4), args.score_iter))
+        print("add_user - ap_score: {} (iter: {})\n".format(round(total_ap_score_user,4), args.score_iter))
 
     os.system("rm /tmp/tmp*")

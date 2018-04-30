@@ -319,7 +319,7 @@ def learn_embeddings_by_chunk(args, G, chunk_size, num_pool):
             walks_files.extend(p.map(node2vec_walk_multi_by_chunk, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes, [chunk_size]*num_pool))
 
     timestr = time.strftime("%y%m%d_%H%M%S")
-    total_walk_file_name = args.input.replace("graph","walks").replace("edgelist","")+"num{}_length{}_pop{}".format(args.num_walks, args.walk_length, args.popwalk)+timestr
+    total_walk_file_name = args.input.replace("graph","walks").replace("edgelist","")+"num{}_length{}_pop{}_".format(args.num_walks, args.walk_length, args.popwalk)+timestr
     for wfile in walks_files:
         os.system("cat "+wfile+" >> "+total_walk_file_name)
     
@@ -413,7 +413,8 @@ def main(args, ep):
     else:
         walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
         emb = learn_embeddings(walks)
-
+        del walks
+    del G
     ks = [1,5,10,15,50,100,500,1000]
     results, final_results = link_prediction(args, nx_G, emb, train_edges, test_edges, ks=ks) if args.prediction else (False, False)
     nodes = nx_G.nodes()
@@ -424,9 +425,13 @@ def main(args, ep):
         add_edges = add_user_edge(args, nx_G, emb, ratio=0.1)
         nx_G.add_weighted_edges_from(add_edges)
         G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.popwalk)
-        walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
-        emb = learn_embeddings(walks)
-
+        if args.by_chunk:
+            emb = learn_embeddings_by_chunk(args, G, args.chunk_size, args.multi_num)
+        else:
+            walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
+            emb = learn_embeddings(walks)
+            del walks
+        del G
         results_user, final_results_user = link_prediction(args, nx_G, emb, train_edges, test_edges, ks=ks) if args.prediction else (False, False)
         roc_score_user, ap_score_user = get_roc_score(emb, test_edges, neg_edges, args) if args.auc else (0,0)
     else:

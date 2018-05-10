@@ -29,8 +29,10 @@ parser.add_argument('-iter', type=int, default=SGD_EPOCHS,
 
 parser.add_argument('-workers', type=int, default=WORKERS,
                     help='Number of parallel workers. Default is 8.')
-parser.add_argument('-multi-num', type=int, default=WORKERS,
-                    help='Number of multi-processor. Default is 8.')
+parser.add_argument('-multi-num', type=int, default=MULTI_NUM,
+                    help='Number of multi-processor.')
+parser.add_argument('-add-multi-num', type=int, default=ADD_MULTI_NUM,
+                    help='Number of multi-processor.')
 
 parser.add_argument('-p', type=float, default=1,
                     help='Return hyperparameter. Default is 1.')
@@ -64,6 +66,9 @@ parser.add_argument('-user-edges-thre', default=USER_EDGES_THRE, type=float,
 
 parser.add_argument('-link-method', action='store', default=LINK_METHOD,
                     help='select method for an edge representation (cos/avg/hadamard/weight1/weight2)')
+parser.add_argument('-add-by-matrix', action='store', default=ADD_BY_MATRIX_BOOL,
+                    help='select method for an edge representation (cos/avg/hadamard/weight1/weight2)')
+                    
 
 parser.add_argument('-popwalk', dest='popwalk', action='store', default=POPWALK,
                     help='three modes are supported for random walk(none/pop/both)')

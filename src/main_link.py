@@ -255,8 +255,10 @@ def node2vec_walk_multi_on_the_fly(num_walks, walk_length,  G, nodes):
 def node2vec_walk_multi_on_the_fly_by_chunk(num_walks, walk_length,  G, nodes, chunk_size):
     import tempfile
     tmp_walks_txt = tempfile.NamedTemporaryFile(delete=False)
-    node_chunks = list(chunks(nodes, chunk_size))
-    for i, chunk in enumerate(node_chunks):
+    tmp_walks_txt.close()
+    # print(tmp_walks_txt.name)
+    nodes = list(chunks(nodes, chunk_size))
+    for i, chunk in enumerate(nodes):
         walks = G.simulate_walks_on_the_fly(num_walks, args.walk_length, chunk)
         walks = [" ".join(map(str, walk)) for walk in walks]
         with open(tmp_walks_txt.name, "a") as file:
@@ -264,7 +266,7 @@ def node2vec_walk_multi_on_the_fly_by_chunk(num_walks, walk_length,  G, nodes, c
     return tmp_walks_txt.name
 
 def simulate_walk_popularity_multi(args, G, num_pool=4):
-    p = pp.ProcessPool(num_pool)
+
     nodes = list(G.G.nodes())
     len_nodes = len(nodes)
     split_point = range(0,len_nodes,int(math.ceil(float(len_nodes)/num_pool)))+[len_nodes]
@@ -273,6 +275,8 @@ def simulate_walk_popularity_multi(args, G, num_pool=4):
     num_walks = int(args.num_walks/2) if args.popwalk == "both" else args.num_walks
 
     walks = []
+    p = pp.ProcessPool(num_pool)
+    p.restart()
     if args.on_the_fly:
         if args.popwalk == "both":
             G.popwalk == "none"
@@ -292,21 +296,22 @@ def simulate_walk_popularity_multi(args, G, num_pool=4):
     walks = [w for walk in walks for w in walk]
     return walks
 
-def learn_embeddings_by_chunk(args, G, chunk_size, num_pool):
-    p = pp.ProcessPool(num_pool)
+def learn_embeddings_by_chunk(args, G, chunk_size, num_pool, verbose=True, added=False):
     nodes = list(G.G.nodes())
     len_nodes = len(nodes)
     node_per_num_pool = int(math.ceil(len_nodes*1.0/num_pool))
     splited_nodes = [nodes[i*node_per_num_pool:(i+1)*node_per_num_pool] for i in range(num_pool)]
-
     num_walks = int(args.num_walks/2) if args.popwalk == "both" else args.num_walks
-
     walks_files = []
+
+    p = pp.ProcessPool(num_pool)
+    if added:
+        p.restart()
     if args.on_the_fly:
         if args.popwalk == "both":
-            G.popwalk == "none"
+            G.popwalk = "none"
             walks_files = p.map(node2vec_walk_multi_on_the_fly_by_chunk, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes, [chunk_size]*num_pool)
-            G.popwalk == "pop"
+            G.popwalk = "pop"
             walks_files.extend(p.map(node2vec_walk_multi_on_the_fly_by_chunk, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes, [chunk_size]*num_pool))
         else:
             walks_files = p.map(node2vec_walk_multi_on_the_fly_by_chunk, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes, [chunk_size]*num_pool)
@@ -317,13 +322,17 @@ def learn_embeddings_by_chunk(args, G, chunk_size, num_pool):
         if args.popwalk == "pop" or args.popwalk == "both":
             G.preprocess_transition_probs_popularity()
             walks_files.extend(p.map(node2vec_walk_multi_by_chunk, [num_walks]*num_pool, [args.walk_length]*num_pool, [G]*num_pool, splited_nodes, [chunk_size]*num_pool))
+    p.terminate()
 
     timestr = time.strftime("%y%m%d_%H%M%S")
     total_walk_file_name = args.input.replace("graph","walks").replace("edgelist","")+"num{}_length{}_pop{}_".format(args.num_walks, args.walk_length, args.popwalk)+timestr
+    if added: total_walk_file_name = total_walk_file_name + "_user_edges_added"
+    if verbose: print("total walks file: "+total_walk_file_name)
     for wfile in walks_files:
         os.system("cat "+wfile+" >> "+total_walk_file_name)
     
     sentences = LineSentence(total_walk_file_name)
+    if verbose: print("start learning embedidngs")
     model = Word2Vec(sentences, size=args.dimensions, window=args.window_size, min_count=0, sg=1, workers=args.workers, iter=args.iter) 
     return model.wv
     
@@ -336,58 +345,120 @@ def build_user_sim_matrx(emb, user_nodes):
             user_matrix[j][i] = similarity
     return user_matrix
 
-def get_add_edge_by_ratio(user_nodes, user_matrix, ratio):
+def get_add_edge_by_ratio(user_nodes, ratio, user_matrix=None, emb=None):
     add_edge_num = int(len(user_nodes)*ratio)
     add_edge = []
     for i, user in enumerate(user_nodes):
-        similarities = zip(user_nodes, list(user_matrix[i]))
+        if user_matrix is not None:
+            user_user_sim_list = list(user_matrix[i])
+        elif emb is not None:
+            user_user_sim_list = [emb.similarity(str(user), str(user2)) for user2 in user_nodes]
+            user_user_sim_list[i] = 0
+        else:
+            raise Exception("You should provide either the user_sim_matrix or the embedding")
+        
+        similarities = zip(user_nodes, user_user_sim_list)
         similarities = sorted(similarities, key=lambda tup:-tup[1])
         add_edge.extend([(user, x[0], 1) for x in similarities[:add_edge_num]])
     return add_edge
 
-def get_add_edge_by_step(user_nodes, user_matrix, thre):
+def get_add_edge_by_step(user_nodes, thre, user_matrix=None, emb=None):
     add_edge = []
     for i, user in enumerate(user_nodes):
-        similarities = zip(user_nodes, list(user_matrix[i]))
+        if user_matrix is not None:
+            user_user_sim_list = list(user_matrix[i])
+        elif emb is not None:
+            user_user_sim_list = [emb.similarity(str(user), str(user2)) for user2 in user_nodes]
+            user_user_sim_list[i] = 0
+        else:
+            raise Exception("You should provide either the user_sim_matrix or the embedding")
+        similarities = zip(user_nodes, user_user_sim_list)
         similarities = [x for x in similarities if x[1]>thre]
         add_edge.extend([(user, x[0], 1) for x in similarities])
     return add_edge
 
-def get_add_edge_by_relu(user_nodes, user_matrix, thre):
+def get_add_edge_by_relu(user_nodes, thre, user_matrix=None, emb=None):
     add_edge = []
     for i, user in enumerate(user_nodes):
-        similarities = zip(user_nodes, list(user_matrix[i]))
+        if user_matrix is not None:
+            user_user_sim_list = list(user_matrix[i])
+        elif emb is not None:
+            user_user_sim_list = [emb.similarity(str(user), str(user2)) for user2 in user_nodes]
+            user_user_sim_list[i] = 0
+        else:
+            raise Exception("You should provide either the user_sim_matrix or the embedding")
+        similarities = zip(user_nodes, user_user_sim_list)
         similarities = [x for x in similarities if x[1]>thre]
         add_edge.extend([(user, x[0], x[1]) for x in similarities])
     return add_edge
 
-def get_add_edge_by_relu_ratio(user_nodes, user_matrix, ratio):
+def get_add_edge_by_relu_ratio(user_nodes, ratio, user_matrix=None, emb=None):
     add_edge_num = int(len(user_nodes)*ratio)
     add_edge = []
     for i, user in enumerate(user_nodes):
-        similarities = zip(user_nodes, list(user_matrix[i]))
+        if user_matrix is not None:
+            user_user_sim_list = list(user_matrix[i])
+        elif emb is not None:
+            user_user_sim_list = [emb.similarity(str(user), str(user2)) for user2 in user_nodes]
+            user_user_sim_list[i] = 0
+        else:
+            raise Exception("You should provide either the user_sim_matrix or the embedding")
+        similarities = zip(user_nodes, user_user_sim_list)
         similarities = sorted(similarities, key=lambda tup:-tup[1])
         add_edge.extend([(user, x[0], x[1]) for x in similarities[:add_edge_num]])
     return add_edge
 
-def add_user_edge(args, g,emb, ratio=0.1):
+
+def add_user_edge(args, g, emb, by_matrix=False):
     if args.unseparated:
         user_nodes = [x for x in g.nodes()]
     else:
         user_nodes = [x for x in g.nodes() if not str(x).startswith('9999999')]
-    user_matrix = build_user_sim_matrx(emb, user_nodes)
     
+    user_matrix = build_user_sim_matrx(emb, user_nodes) if by_matrix else None
+    emb = None if by_matrix else emb
     if args.user_edges_mode == "ratio":
-        add_edge = get_add_edge_by_ratio(user_nodes, user_matrix, args.user_edges_ratio)
+        add_edge = get_add_edge_by_ratio(user_nodes, args.user_edges_ratio, user_matrix, emb)
     elif args.user_edges_mode == "step":
-        add_edge = get_add_edge_by_step(user_nodes, user_matrix, args.user_edges_thre)
+        add_edge = get_add_edge_by_step(user_nodes, args.user_edges_thre, user_matrix, emb)
     elif args.user_edges_mode == "relu":
-        add_edge = get_add_edge_by_relu(user_nodes, user_matrix, args.user_edges_thre)
+        add_edge = get_add_edge_by_relu(user_nodes, args.user_edges_thre, user_matrix, emb)
     elif args.user_edges_mode == "relu-ratio":
-        add_edge = get_add_edge_by_relu(user_nodes, user_matrix, args.user_edges_ratio)
+        add_edge = get_add_edge_by_relu(user_nodes, args.user_edges_ratio, user_matrix, emb)
     else:
         raise Exception("user-edges-mode value fault: "+str(args.user_edges_mode))
+    
+    return add_edge
 
+def add_user_edge_by_chunk(args, g, emb, num_pool, by_matrix=False, added=False):
+    if args.unseparated:
+        user_nodes = [x for x in g.nodes()]
+    else:
+        user_nodes = [x for x in g.nodes() if not str(x).startswith('9999999')]
+    node_per_num_pool = int(math.ceil(len(user_nodes)*1.0/num_pool))
+    splited_nodes = [user_nodes[i*node_per_num_pool:(i+1)*node_per_num_pool] for i in range(num_pool)]
+
+    user_matrix = build_user_sim_matrx(emb, user_nodes) if by_matrix else None
+    emb = None if by_matrix else emb
+
+    p = pp.ProcessPool(num_pool)
+    if added:
+        p.restart()
+    if args.user_edges_mode == "ratio":
+        add_edge = p.map(get_add_edge_by_ratio, splited_nodes, [args.user_edges_ratio]*num_pool, [user_matrix]*num_pool, [emb]*num_pool)
+        add_edge = [x for chunk in add_edge for x in chunk]
+    elif args.user_edges_mode == "step":
+        add_edge = p.map(get_add_edge_by_step, splited_nodes, [args.user_edges_thre]*num_pool, [user_matrix]*num_pool, [emb]*num_pool)
+        add_edge = [x for chunk in add_edge for x in chunk]
+    elif args.user_edges_mode == "relu":
+        add_edge = p.map(get_add_edge_by_relu, splited_nodes, [args.user_edges_thre]*num_pool, [user_matrix]*num_pool, [emb]*num_pool)
+        add_edge = [x for chunk in add_edge for x in chunk]
+    elif args.user_edges_mode == "relu-ratio":
+        add_edge = p.map(get_add_edge_by_relu, splited_nodes, [args.user_edges_ratio]*num_pool, [user_matrix]*num_pool, [emb]*num_pool)
+        add_edge = [x for chunk in add_edge for x in chunk]
+    else:
+        raise Exception("user-edges-mode value fault: "+str(args.user_edges_mode))
+    p.terminate()
     return add_edge
 
 def chunks(l, n):
@@ -395,45 +466,75 @@ def chunks(l, n):
     for i in range(0, len(l), n):
         yield l[i:i + n]
 
-def main(args, ep):
+def main(args, ep, verbose=True):
     '''
     Pipeline for representational learning for all nodes in a graph.
     '''
-
     nx_G = read_graph(args)
+    if verbose: print("readed graph ({})".format(time.strftime("%H:%M")))
     all_edges = nx_G.edges()
     train_edges, test_edges = train_test_split(np.asarray(all_edges), test_size=args.test_ratio, random_state=RANDOM_SEED)
+    if verbose: print("splitted edges ({})".format(time.strftime("%H:%M")))
+
     if ep == 0:
         print('# nodes: {}, #train edges: {}, #test edges: {}'.format(len(nx_G.nodes()),len(train_edges), len(test_edges)))
 
     nx_G.remove_edges_from(test_edges)
     G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.popwalk)
+    if verbose: print("Construced instance of node2vec class ({})".format(time.strftime("%H:%M")))
+
     if args.by_chunk:
+        
         emb = learn_embeddings_by_chunk(args, G, args.chunk_size, args.multi_num)
+        if verbose: print("learnt embedding by chunk ({})".format(time.strftime("%H:%M")))
+
     else:
         walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
+        if verbose: print("simulated walk ({})".format(time.strftime("%H:%M")))
+
         emb = learn_embeddings(walks)
+        if verbose: print("learnt embedding ({})".format(time.strftime("%H:%M")))
+
         del walks
     del G
+    
     ks = [1,5,10,15,50,100,500,1000]
-    results, final_results = link_prediction(args, nx_G, emb, train_edges, test_edges, ks=ks) if args.prediction else (False, False)
+    results, final_results = link_prediction(args, nx_G, emb, train_edges, test_edges, ks=ks) if args.prediction else (False, False) if args.prediction else None, None
     nodes = nx_G.nodes()
     neg_edges = build_neg_samples(nodes, all_edges)
+    if verbose: print("built negative edges ({})".format(time.strftime("%H:%M")))
+
     roc_score, ap_score = get_roc_score(emb, test_edges, neg_edges, args) if args.auc else (0,0)
+    if verbose: print("got roc score: {} ({})".format(roc_score, time.strftime("%H:%M")))
+    del all_edges, nodes
+    
 
     if args.add_user_edges and not args.unseparated:
-        add_edges = add_user_edge(args, nx_G, emb, ratio=0.1)
-        nx_G.add_weighted_edges_from(add_edges)
-        G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.popwalk)
         if args.by_chunk:
-            emb = learn_embeddings_by_chunk(args, G, args.chunk_size, args.multi_num)
+            add_edges = add_user_edge_by_chunk(args, nx_G, emb, args.add-multi_num, by_matrix=args.add_by_matrix)
+        else:
+            add_edges = add_user_edge(args, nx_G, emb, by_matrix=args.add_by_matrix)
+        if verbose: print("got adding edges ({})".format(time.strftime("%H:%M")))
+        nx_G.add_weighted_edges_from(add_edges)
+        if verbose: print("added weight to graph ({})".format(time.strftime("%H:%M")))
+        print('# nodes: {}, #train edges: {}, #test edges: {}'.format(len(nx_G.nodes()),len(nx_G.edges()), len(test_edges)))
+        G = node2vec.Graph(nx_G, args.directed, args.p, args.q, args.popwalk)
+        del nx_G
+        if verbose: print("constructed node2vec instance ({})".format(time.strftime("%H:%M")))
+        if args.by_chunk:
+            emb = learn_embeddings_by_chunk(args, G, args.chunk_size, args.multi_num, added=True)
+            if verbose: print("learn embeddings by chunk ({})".format(time.strftime("%H:%M")))
         else:
             walks = simulate_walk_popularity_multi(args, G, num_pool=args.multi_num)
+            if verbose: print("simulated walk ({})".format(time.strftime("%H:%M")))
             emb = learn_embeddings(walks)
+            if verbose: print("learnt embeddings ({})".format(time.strftime("%H:%M")))
             del walks
+        nx_G = G.G
         del G
-        results_user, final_results_user = link_prediction(args, nx_G, emb, train_edges, test_edges, ks=ks) if args.prediction else (False, False)
+        results_user, final_results_user = link_prediction(args, nx_G, emb, train_edges, test_edges, ks=ks) if args.prediction else (False, False) if args.prediction else None, None
         roc_score_user, ap_score_user = get_roc_score(emb, test_edges, neg_edges, args) if args.auc else (0,0)
+        if verbose: print("got roc score ({})".format(time.strftime("%H:%M")))
     else:
         roc_score_user, ap_score_user = None, None
     return results, final_results, roc_score, ap_score, roc_score_user, ap_score_user
@@ -457,7 +558,7 @@ if __name__ == "__main__":
     total_roc_score = sum(total_roc_score)/len(total_roc_score)
     total_ap_score = sum(total_ap_score)/len(total_ap_score)
 
-    if not final_results==False:
+    if not final_results is None:
         final_results = sorted(final_results.items(), key=lambda tup: tup[0])
         with open('./link_pred_results/'+args.input.split('/')[-1]+'.results', 'w') as file:
             file.write(str(final_results))

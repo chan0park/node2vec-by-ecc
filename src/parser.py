@@ -85,5 +85,6 @@ parser.add_argument('-by-chunk', dest='by_chunk', action='store_true', default=B
 parser.add_argument('-chunk-size', type=int, default=1000,
                     help='Number of nodes to simulate random walk and learn embedding')
 
-
+parser.add_argument('-verbose', dest='verbose', action='store_true', default=VERBOSE_BOOL)
+parser.add_argument('-walk-path', action='store', default=None, type=str)
 args = parser.parse_args()

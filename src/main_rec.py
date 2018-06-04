@@ -337,6 +337,7 @@ def main(data_path, line_format, sep=',', algo="knn", item_based=False, verbose=
     except:
         reader = Reader(line_format=line_format, sep=sep, skip_lines=1)
         data = Dataset.load_from_file(data_path, reader=reader)
+    raise
     if algo == "knn":
         from surprise import KNNBasic
         algo = KNNBasic(sim_options=sim_options, k=args.k, min_k=args.mink)

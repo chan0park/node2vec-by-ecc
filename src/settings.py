@@ -1,8 +1,8 @@
 TEST_RATIO = 0.5
 RANDOM_SEED = 123
 
-WALK_LENGTH = 20
-NUM_WALKS = 1
+WALK_LENGTH = 40
+NUM_WALKS = 5
 
 EMB_DIMENSION = 128
 SGD_EPOCHS = 1
@@ -13,11 +13,12 @@ ADD_MULTI_NUM = 12
 SCORE_ITER = 1
 
 UNSEPARATED_BOOL = False
-WEIGHTED_BOOL = True
+WEIGHTED_BOOL = False
 BY_CHUNK_BOOL = False
 ON_THE_FLY_BOOL = True
 ADD_BY_MATRIX_BOOL = False
 
+SIMILARITY_METHOD = "cos" # {cos/pearson/JSD}
 LINK_METHOD = "cos" # {cos/avg/hadamard/weight1/weight2}
 POPWALK = "none" # {none/pop/both}
 
@@ -26,4 +27,4 @@ USER_EDGES_MODE = "ratio"
 USER_EDGES_RATIO = 0.1
 USER_EDGES_THRE = 0.5
 
-VERBOSE_BOOL = False
+VERBOSE_BOOL = True

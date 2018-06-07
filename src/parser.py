@@ -87,4 +87,7 @@ parser.add_argument('-chunk-size', type=int, default=1000,
 
 parser.add_argument('-verbose', dest='verbose', action='store_true', default=VERBOSE_BOOL)
 parser.add_argument('-walk-path', action='store', default=None, type=str)
+
+parser.add_argument('-sim-method', action='store', default=SIMILARITY_METHOD, type=str)
+
 args = parser.parse_args()

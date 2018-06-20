@@ -1,5 +1,6 @@
 from utils import *
 from plot import *
+from recsys import userBasedCFPrediction, itemBasedCFPrediction
 import pickle
 import os
 import argparse
@@ -17,6 +18,7 @@ parser.add_argument('-regression_30', action='store_true', default=False)
 parser.add_argument('-embedding_split_10', action='store_true', default=False, help="Split users in 10 groups and make separate edgelist file")
 parser.add_argument('-split_n', action='store', default=10, help='Number of bins')
 parser.add_argument('-toy', action='store_true', default=False, help='Toy mode - include split/save edgelist')
+parser.add_argument('-verbose', action='store_true', default=False, help='Boolean specifying verbose mode')
 args = parser.parse_args()
 
 if args.load_all:
@@ -25,23 +27,27 @@ if args.load_all:
         df_30 = import_30("./data/30_eventinfo.csv")
         df_30 = mark_timewindow(df_30)
         save_pickle(df_30, 'df_30')
-
-if args.marktime:
-    df_ml = mark_timewindow(df_ml)
-    df_30 = mark_timewindow(df_30) 
+    if args.verbose: print("df_30 loaded")
 
 df_ml_iu = check_and_import('./df/df_ml_iu')
 if df_ml_iu is None:
-    df_ml_iu = import_ml("./data/ratings.csv")
+    df_ml_iu = import_ml("./data/ratings.csv", headercol=['uid','id','feedback','timestamp'])
     df_ml_iu = mark_timewindow(df_ml_iu)
     df_ml_iu.columns = ['uid','id','feedback','timestamp','timewindow']
     save_pickle(df_ml_iu, 'df_ml_iu')
+if args.verbose: print("df_ml_iu loaded")
+
+if args.marktime:
+    df_ml_iu = mark_timewindow(df_ml_iu)
+    df_30 = mark_timewindow(df_30) 
+    if args.verbose: print("marked time-window")
 
 df_30_iu = check_and_import('./df/df_30_iu')
 if df_30_iu is None:
     # df_30_iu = df_30.groupby(["uid", "id", "ym"]).size().reset_index(name="feedback")
     df_30_iu = df_30.groupby(["uid", "id", "timewindow"]).size().reset_index(name="feedback")
     save_pickle(df_30_iu, 'df_30_iu')
+if args.verbose: print("df_30_iu loaded")
 
 df_30_ue, df_30_ie = check_and_import('./df/df_30_ue'), check_and_import('./df/df_30_ie')
 if df_30_ue is None or df_30_ie is None:
@@ -54,7 +60,7 @@ if df_30_ue is None or df_30_ie is None:
     save_pickle(df_30_ue, 'df_30_ue')
     df_30_ie = calculate_ie(df_30_iu, df_30_ue)
     save_pickle(df_30_ie, 'df_30_ie')
-
+if args.verbose: print("df_30_ue, df_30_ie loaded")
 
 df_ml_ue, df_ml_ie = check_and_import('./df/df_ml_ue'), check_and_import('./df/df_ml_ie')
 if df_ml_ue is None or df_ml_ie is None:
@@ -65,6 +71,7 @@ if df_ml_ue is None or df_ml_ie is None:
     save_pickle(df_ml_ue, 'df_ml_ue')
     df_ml_ie = calculate_ie(df_ml_iu, df_ml_ue)
     save_pickle(df_ml_ie, 'df_ml_ie')
+if args.verbose: print("df_ml_ue, df_ml_ie loaded")
 
 if args.toy:
     df_30_toy = random_sample_users(df_30, 0.01)
@@ -116,6 +123,9 @@ if args.plot_density:
     plot_ie_density(df_30_ie, df_ml_ie)
     # UE by age
     plot_ue_age(df_30_userinfo, df_30_ue)
+
+if args.collaborative:
+
 
 if args.classification_30 or args.regression_30:
     df_30_iteminfo = df_30_iu.groupby(["uid","id"]).size().reset_index(name="size").groupby(["id"]).size().reset_index(name="usernum")

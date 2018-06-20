@@ -89,5 +89,9 @@ parser.add_argument('-verbose', dest='verbose', action='store_true', default=VER
 parser.add_argument('-walk-path', action='store', default=None, type=str)
 
 parser.add_argument('-sim-method', action='store', default=SIMILARITY_METHOD, type=str)
+parser.add_argument('-desc', action='store', default="", type=str)
+
 
 args = parser.parse_args()
+settings_str = "{}\nsettings: data {}/score_iter {}/tratio {}/add {}/dim {}/wlk_len {}/wlk_num {}/wndw {}/workers {}/mlti {}/add_multi {}/p {}/q {}/weighted {}/add_mode {}/ratio {}/thre {}/sim {}".format(args.desc, args.input, args.score_iter, args.test_ratio, args.add_user_edges, args.dimensions, args.walk_length, args.num_walks, args.window_size, args.workers, args.multi_num, args.add_multi_num, args.p, args.q, args.weighted, args.user_edges_mode, args.user_edges_ratio, args.user_edges_thre, args.sim_method)
+print(settings_str)

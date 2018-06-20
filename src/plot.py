@@ -108,3 +108,24 @@ def plot_ue_age(df_30_userinfo, df_30_ue):
     plt.legend(fontsize="large")
     plt.show()
 
+def plot_long_tail(df_iu):
+    df_i = df_iu.groupby(["id"]).size().reset_index(name="unum")
+    unum_list = list(df_i.unum)
+    unum_list.sort(reverse=True)
+    y_pos = []
+    x_pos = list(range(0,100,5))
+    step = int(np.ceil(len(unum_list)/20.0))
+    for i in range(0, len(unum_list), step):
+        chunk = unum_list[i:i+step]
+        y_pos.append(float(sum(chunk))/sum(unum_list))
+    
+    plt.figure(figsize=(8,6))
+    plt.bar(x_pos[:15], y_pos[:15], width=5, align='edge', color='brown')
+    plt.rc('xtick', labelsize=13)
+    plt.rc('ytick', labelsize=13)
+    plt.ylabel('Consumed user number / Total user number', fontsize=15, labelpad=15)
+    plt.xlabel('Items Ranked by Popularity (%)', fontsize=15, labelpad=10)
+    plt.tight_layout()
+    plt.show()
+
+plot_long_tail(df_ml_iu)

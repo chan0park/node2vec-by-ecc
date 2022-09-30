@@ -18,7 +18,7 @@ gensim==3.2.0
 idna==2.6
 isort==4.2.15
 jmespath==0.9.3
-joblib==0.11
+joblib==1.2.0
 lazy-object-proxy==1.3.1
 matplotlib==2.1.1
 mccabe==0.6.1
